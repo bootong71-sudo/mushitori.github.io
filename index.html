@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>夏の虫取りゲーム</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:sans-serif; background:black; }
+  #caughtList { position:absolute; top:10px; left:10px; display:flex; flex-direction:column; }
+  #message { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+             font-size:48px; color:yellow; display:none; text-align:center;}
+  canvas { display:block; }
+  #settings { position:absolute; top:10px; right:10px; color:white; text-align:right; }
+  button { font-size:16px; padding:4px 10px; }
+</style>
+</head>
+<body>
+<div id="caughtList"></div>
+<div id="message"></div>
+<div id="settings">
+  <button id="startBtn">ゲームスタート</button><br><br>
+  出現間隔: 
+  <input type="range" id="spawnSlider" min="3000" max="10000" value="5000">
+  <span id="spawnVal">5.0</span> 秒<br><br>
+  捕まえる数: 
+  <input type="range" id="maxBugSlider" min="3" max="10" value="5">
+  <span id="maxBugVal">5</span> 匹
+</div>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+window.addEventListener('resize', ()=>{
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+const bgImg = new Image();
+bgImg.src = 'background.png';
+
+const bugNames = ['semi','kabuto','kuwagata'];
+const bugImgs = [];
+for(let i=0;i<3;i++){
+  const img = new Image();
+  img.src = `${bugNames[i]}.png`;
+  bugImgs.push(img);
+}
+
+const yaySound = new Audio('yatta.mp3');
+let bugs = [];
+let caughtBugs = [];
+let maxCaught = 5;
+let gameOver = false;
+let endTime = 0;
+let lastActionTime = Date.now();
+let spawnInterval = 5000; // 初期値5秒
+
+// 出現間隔スライダー
+const spawnSlider = document.getElementById('spawnSlider');
+const spawnVal = document.getElementById('spawnVal');
+spawnSlider.addEventListener('input', ()=>{
+  spawnInterval = parseInt(spawnSlider.value);
+  spawnVal.textContent = (spawnInterval/1000).toFixed(1);
+});
+
+// 捕まえる数スライダー
+const maxBugSlider = document.getElementById('maxBugSlider');
+const maxBugVal = document.getElementById('maxBugVal');
+maxCaught = parseInt(maxBugSlider.value);
+maxBugSlider.addEventListener('input', ()=>{
+  maxCaught = parseInt(maxBugSlider.value);
+  maxBugVal.textContent = maxCaught;
+});
+
+class Bug {
+  constructor(img,name){
+    this.img = img;
+    this.name = name;
+    this.size = 80*4; 
+    this.x = canvas.width/2;
+    this.y = 100 + Math.random()*(canvas.height-200);
+    this.caught = false;
+    this.escaping = false;
+    this.bugSound = new Audio(`${name}.mp3`);
+    this.bugSound.loop = true;
+  }
+  playSound(){
+    this.bugSound.play().catch(()=>{});
+  }
+  update(){
+    if(this.escaping){
+      this.x += this.escapeDir*3;
+      this.y -= 3;
+      if(this.x<0 || this.x>canvas.width || this.y<0) this.remove();
+    }
+  }
+  draw(){
+    ctx.drawImage(this.img,this.x-this.size/2,this.y-this.size/2,this.size,this.size);
+  }
+  catch(){
+    if(this.bugSound) this.bugSound.pause();
+    yaySound.currentTime=0;
+    yaySound.play();
+    caughtBugs.push(this.img);
+    updateCaughtList();
+    this.remove();
+    checkGameOver();
+  }
+  escape(){
+    if(this.bugSound) this.bugSound.pause();
+    this.escaping = true;
+    this.escapeDir = Math.random()<0.5 ? -1:1;
+  }
+  remove(){
+    const index = bugs.indexOf(this);
+    if(index>-1) bugs.splice(index,1);
+    if(!gameOver){
+      setTimeout(spawnBug, spawnInterval);
+    }
+  }
+}
+
+function spawnBug(){
+  if(gameOver) return;
+  const idx = Math.floor(Math.random()*bugImgs.length);
+  const img = bugImgs[idx];
+  const name = bugNames[idx];
+  const bug = new Bug(img,name);
+  bug.playSound();
+  bugs.push(bug);
+  lastActionTime = Date.now();
+}
+
+function updateCaughtList(){
+  const listDiv = document.getElementById('caughtList');
+  listDiv.innerHTML = '';
+
+  const fixedSize = 66; // 左端虫のサイズを3分の2に固定
+
+  caughtBugs.forEach((img,index)=>{
+    const el = document.createElement('div');
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.margin = '2px';
+
+    const imgEl = document.createElement('img');
+    imgEl.src = img.src;
+    imgEl.style.width = fixedSize + 'px';
+    imgEl.style.height = 'auto';
+    imgEl.style.marginRight='5px';
+    el.appendChild(imgEl);
+
+    const text = document.createElement('span');
+    text.style.color='white';
+    text.textContent = `${index+1}ひき`;
+    el.appendChild(text);
+
+    listDiv.appendChild(el);
+  });
+}
+
+function checkGameOver(){
+  if(caughtBugs.length>=maxCaught){
+    gameOver = true;
+
+    // メッセージを捕まえた数に合わせて変更
+    const msgDiv = document.getElementById('message');
+    msgDiv.textContent = `おめでとう ${caughtBugs.length}ひき とれたね！`;
+    msgDiv.style.display='block';
+
+    // 音楽1秒後再生
+    setTimeout(()=>{ new Audio('fanfare.mp3').play(); },1000);
+
+    endTime = Date.now();
+    // 5秒後にスタートボタン表示
+    setTimeout(()=>{ document.getElementById('startBtn').style.display='inline'; },5000);
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(bgImg,0,0,canvas.width,canvas.height);
+  bugs.forEach(b=>{ b.update(); b.draw(); });
+
+  if(!gameOver && Date.now()-lastActionTime>5000){
+    bugs.forEach(b=>{ if(!b.caught && !b.escaping) b.escape(); });
+  }
+
+  requestAnimationFrame(draw);
+}
+draw();
+
+function handleAction(){
+  lastActionTime = Date.now();
+  if(gameOver) return;
+  if(bugs.length>0){
+    bugs[0].catch();
+  }
+}
+
+document.addEventListener('mousedown', handleAction);
+document.addEventListener('touchstart', e=>{
+  handleAction();
+  e.preventDefault();
+});
+document.addEventListener('keydown', handleAction);
+
+function resetGame(){
+  bugs.forEach(b=>{ if(b.bugSound) b.bugSound.pause(); });
+  bugs=[];
+  caughtBugs=[];
+  gameOver=false;
+  document.getElementById('message').style.display='none';
+  updateCaughtList();
+  spawnBug();
+}
+
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  resetGame();
+  document.getElementById('startBtn').style.display='none';
+});
+</script>
+</body>
+</html>
